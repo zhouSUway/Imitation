@@ -41,7 +41,5 @@ public class PageViewOutputWriter implements IOutputWriter {
 
         //添加到bacth
         pst.addBatch();
-
-
     }
 }
