@@ -10,6 +10,7 @@ import java.util.Date;
 import java.util.SimpleTimeZone;
 
 import static org.apache.commons.configuration.DataConfiguration.DEFAULT_DATE_FORMAT;
+import static org.apache.htrace.fasterxml.jackson.databind.util.ISO8601Utils.format;
 
 public class TimeUtil {
 
@@ -98,6 +99,9 @@ public class TimeUtil {
         return dt == null ? 0 : dt.getTime();
     }
 
+    public static String getYesterdayDate(){
+        return getYesterdayDate(DEFAULT_DATE_FORMAT);
+    }
 
     /**
      * 将时间戳转换成日期, 默认的格式

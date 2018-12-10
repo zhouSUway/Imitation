@@ -27,6 +27,11 @@ public class StatsCommonDimension extends StatsBaseDimension {
         this.kpiDimension = kpiDimension;
     }
 
+    protected static StatsCommonDimension clone(StatsCommonDimension statsCommonDimension) {
+
+            return null;
+    }
+
 
     @Override
     public int compareTo(BaseDimension o) {
