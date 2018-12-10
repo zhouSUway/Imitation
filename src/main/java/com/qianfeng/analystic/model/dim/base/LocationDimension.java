@@ -10,8 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * @Auther: lyd
- * @Date: 2018/8/2 11:33
+ *
  * @Description:地域维度
  */
 public class LocationDimension extends BaseDimension{

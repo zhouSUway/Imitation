@@ -23,7 +23,6 @@ import java.util.List;
 public class ActiveMemberMapper extends TableMapper<StatsUserDimension,TimeOutputValue> {
 
     private static final Logger logger = Logger.getLogger(ActiveMemberMapper.class);
-    private byte[] family = Bytes.toBytes(EventConstant.HBASE_COLUMN_FAMILY);
     private StatsUserDimension key=new StatsUserDimension();
     private TimeOutputValue value = new TimeOutputValue();
     private KpiDimension activeMemberKpi = new KpiDimension(KpiTypeEnum.ACTIVE_MEMBER.kpiName);
@@ -32,11 +31,14 @@ public class ActiveMemberMapper extends TableMapper<StatsUserDimension,TimeOutpu
     @Override
     protected void map(ImmutableBytesWritable key, Result value, Context context) throws IOException, InterruptedException {
         //获取需要的字段
-        String memberId = Bytes.toString(value.getValue(family,Bytes.toBytes(EventConstant.EVENT_COLUMN_NAME_MEMBER_ID)));
-        String serviceTime = Bytes.toString(value.getValue(family,Bytes.toBytes(EventConstant.EVENT_COLUMN_NAME_SERVER_TIME)));
-        String platform = Bytes.toString(value.getValue(family,Bytes.toBytes(EventConstant.EVENT_COLUMN_NAME_PLATFORM)));
-        String browerName = Bytes.toString(value.getValue(family,Bytes.toBytes(EventConstant.EVENT_COLUMN_NAME_BROWSER_NAME)));
-        String browerVersion = Bytes.toString(value.getValue(family,Bytes.toBytes(EventConstant.EVENT_COLUMN_NAME_BROWSER_VERSION)));
+
+        String line = value.toString();
+        String splited[] = line.split("\001");
+        String memberId = splited[12];
+        String serviceTime =splited[15];
+        String platform =splited[2];
+        String browerName =splited[1];
+        String browerVersion = splited[0];
 
 
         //对三个字段进行判空
@@ -76,9 +78,7 @@ public class ActiveMemberMapper extends TableMapper<StatsUserDimension,TimeOutpu
 
                 //写出
                 context.write(this.key,this.value);
-
             }
-
         }
     }
 }

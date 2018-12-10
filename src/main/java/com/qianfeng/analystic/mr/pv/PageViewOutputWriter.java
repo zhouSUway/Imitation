@@ -6,15 +6,12 @@ import com.qianfeng.analystic.model.dim.value.BaseOutputValueWritable;
 import com.qianfeng.analystic.model.dim.value.reduce.MapperOutputValue;
 import com.qianfeng.analystic.mr.IOutputWriter;
 import com.qianfeng.analystic.mr.service.IDimensionConvert;
-import com.qianfeng.common.EventConstant;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.IntWritable;
-import org.apache.hadoop.io.MapWritable;
 import org.apache.log4j.Logger;
 
 import java.io.IOException;
 import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 
 public class PageViewOutputWriter implements IOutputWriter {

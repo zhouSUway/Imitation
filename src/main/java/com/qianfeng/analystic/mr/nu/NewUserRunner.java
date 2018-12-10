@@ -1,21 +1,26 @@
 package com.qianfeng.analystic.mr.nu;
 
-
+import com.google.common.collect.Lists;
 import com.qianfeng.analystic.model.dim.StatsUserDimension;
 import com.qianfeng.analystic.model.dim.base.DateDimension;
+import com.qianfeng.analystic.model.dim.value.map.TimeOutputValue;
 import com.qianfeng.analystic.model.dim.value.reduce.MapperOutputValue;
+
 import com.qianfeng.analystic.mr.service.IDimensionConvert;
 import com.qianfeng.analystic.mr.service.impl.IDimensionConvertImpl;
 import com.qianfeng.common.DateEnum;
+import com.qianfeng.common.EventConstant;
+
 import com.qianfeng.common.GlobalConstants;
 import com.qianfeng.util.JdbcUtil;
 import com.qianfeng.util.TimeUtil;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.HBaseConfiguration;
+import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.filter.*;
+import org.apache.hadoop.hbase.mapreduce.TableMapReduceUtil;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.mapreduce.Job;
-import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
-import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.log4j.Logger;
@@ -26,46 +31,44 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
+
 /**
- * truncate dimension_browser;
- * truncate dimension_currency_type;
- * truncate dimension_date;
- * truncate dimension_event;
- * truncate dimension_inbound;
- * truncate dimension_kpi;
- * truncate dimension_location;
- * truncate dimension_os;
- * truncate dimension_payment_type;
- * truncate dimension_platform;
- * truncate event_info;
- * truncate order_info;
- * truncate stats_device_browser;
- * truncate stats_device_location;
- * truncate stats_event;
- * truncate stats_hourly;
- * truncate stats_inbound;
- * truncate stats_order;
- * truncate stats_user;
- * truncate stats_view_depth;
- * <p>
- * 新增用户的runnerlei
+ truncate dimension_browser;
+ truncate dimension_currency_type;
+ truncate dimension_date;
+ truncate dimension_event;
+ truncate dimension_inbound;
+ truncate dimension_kpi;
+ truncate dimension_location;
+ truncate dimension_os;
+ truncate dimension_payment_type;
+ truncate dimension_platform;
+ truncate event_info;
+ truncate order_info;
+ truncate stats_device_browser;
+ truncate stats_device_location;
+ truncate stats_event;
+ truncate stats_hourly;
+ truncate stats_inbound;
+ truncate stats_order;
+ truncate stats_user;
+ truncate stats_view_depth;
+ * @Description:新增用户的runner类
  */
-public class NewUserRunner implements Tool {
-
-    private static Logger logger = Logger.getLogger(NewUserRunner.class);
+public class NewUserRunner implements Tool{
+    private static final Logger logger = Logger.getLogger(NewUserRunner.class);
     private Configuration conf = new Configuration();
-
 
     public static void main(String[] args) {
         try {
-            ToolRunner.run(new Configuration(), new NewUserRunner(), args);
+            ToolRunner.run(new Configuration(),new NewUserRunner(),args);
         } catch (Exception e) {
-            logger.warn("执行有误tools", e);
+            logger.error("运行新增用户指标失败.",e);
         }
     }
-
 
     @Override
     public void setConf(Configuration conf) {
@@ -77,34 +80,33 @@ public class NewUserRunner implements Tool {
 
     @Override
     public Configuration getConf() {
-
         return this.conf;
     }
 
     @Override
     public int run(String[] args) throws Exception {
-
         Configuration conf = this.getConf();
-
-        //处理的参数
-        this.handleAgrs(args, conf);
-
-        //并获取job的设置
-
-        Job job = Job.getInstance();
+        //设置参数到conf中
+        this.setArgs(args,conf);
+        //获取作业
+        Job job = Job.getInstance(conf,"new_user");
         job.setJarByClass(NewUserRunner.class);
 
-        //map端
-        job.setMapperClass(NewUserMapper.class);
-        job.setMapOutputKeyClass(StatsUserDimension.class);
+        //初始化mapper类
+        //addDependencyJars : true则是本地提交集群运行，false是本地提交本地运行
+        TableMapReduceUtil.initTableMapperJob(this.getScans(job),NewUserMapper.class,
+                StatsUserDimension.class, TimeOutputValue.class,job,false);
+
+        //reducer的设置
+        job.setReducerClass(NewUserReducer.class);
+        job.setOutputKeyClass(StatsUserDimension.class);
+        job.setOutputValueClass(MapperOutputValue.class);
+
+        //设置输出的格式类
         job.setMapOutputValueClass(MapperOutputValue.class);
 
-//        设置输出路径
-
-        job.setReducerClass(NewUserReducer.class);
-
-        //        return job.waitForCompletion(true)?0:1;
-        if (job.waitForCompletion(true)) {
+//        return job.waitForCompletion(true)?0:1;
+        if(job.waitForCompletion(true)){
             this.computeNewTotalUser(job);
             return 0;
         } else {
@@ -112,16 +114,14 @@ public class NewUserRunner implements Tool {
         }
     }
 
-
     /**
      * 计算新增的总用户
-     * <p>
+     *
      * 1、获取运行当天的日期，然后再获取到运行当天前一天的日期，然后获取对应时间维度Id
      * 2、当对应时间维度Id都大于0，则正常计算：查询前一天的新增总用户，获取当天的新增用户
-     *
      * @param job
      */
-    private void computeNewTotalUser(Job job) {
+    private void computeNewTotalUser(Job job) throws Exception {
         Connection conn = null;
         PreparedStatement ps = null;
         ResultSet rs = null;
@@ -145,47 +145,47 @@ public class NewUserRunner implements Tool {
 
             //判断昨天和今天的维度Id是否大于0
             conn = JdbcUtil.getConn();
-            Map<String, Integer> map = new HashMap<String, Integer>();
-            if (yesterDimensionId > 0) {
-                ps = conn.prepareStatement(conf.get(GlobalConstants.PREFIX_TOTAL + "new_total_user"));
+            Map<String,Integer> map = new HashMap<String,Integer>();
+            if(yesterDimensionId > 0){
+                ps = conn.prepareStatement(conf.get(GlobalConstants.PREFIX_TOTAL+"new_total_user"));
                 //赋值
-                ps.setInt(1, yesterDimensionId);
+                ps.setInt(1,yesterDimensionId);
                 //执行
                 rs = ps.executeQuery();
-                while (rs.next()) {
+                while (rs.next()){
                     int platformId = rs.getInt("platform_dimension_id");
                     int totalNewUser = rs.getInt("total_install_users");
                     //存储
-                    map.put(platformId + "", totalNewUser);
+                    map.put(platformId+"",totalNewUser);
                 }
             }
 
-            if (nowDimensionId > 0) {
-                ps = conn.prepareStatement(conf.get(GlobalConstants.PREFIX_TOTAL + "user_new_user"));
+            if(nowDimensionId > 0){
+                ps = conn.prepareStatement(conf.get(GlobalConstants.PREFIX_TOTAL+"user_new_user"));
                 //赋值
-                ps.setInt(1, nowDimensionId);
+                ps.setInt(1,nowDimensionId);
                 //执行
                 rs = ps.executeQuery();
-                while (rs.next()) {
+                while (rs.next()){
                     int platformId = rs.getInt("platform_dimension_id");
                     int newUser = rs.getInt("new_install_users");
                     //存储
-                    if (map.containsKey(platformId + "")) {
-                        newUser += map.get(platformId + "");
+                    if(map.containsKey(platformId+"")){
+                        newUser += map.get(platformId+"");
                     }
-                    map.put(platformId + "", newUser);
+                    map.put(platformId+"",newUser);
                 }
             }
 
             //更新新增的总用户
-            ps = conn.prepareStatement(conf.get(GlobalConstants.PREFIX_TOTAL + "user_new_update_user"));
+            ps = conn.prepareStatement(conf.get(GlobalConstants.PREFIX_TOTAL+"user_new_update_user"));
             //赋值
-            for (Map.Entry<String, Integer> en : map.entrySet()) {
-                ps.setInt(1, nowDimensionId);
-                ps.setInt(2, Integer.parseInt(en.getKey()));
-                ps.setInt(3, en.getValue());
-                ps.setString(4, conf.get(GlobalConstants.RUNNING_DATE));
-                ps.setInt(5, en.getValue());
+            for (Map.Entry<String,Integer> en:map.entrySet()){
+                ps.setInt(1,nowDimensionId);
+                ps.setInt(2,Integer.parseInt(en.getKey()));
+                ps.setInt(3,en.getValue());
+                ps.setString(4,conf.get(GlobalConstants.RUNNING_DATE));
+                ps.setInt(5,en.getValue());
                 ps.execute();
             }
 
@@ -194,59 +194,85 @@ public class NewUserRunner implements Tool {
         } catch (SQLException e) {
             e.printStackTrace();
         } finally {
-            try {
-                JdbcUtil.getClosed(conn, ps, rs);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
+            JdbcUtil.getClosed(conn,ps,rs);
         }
-    }
-
-    //设置map阶段的输入路径
-    private void setInputOutputPath(Job job) {
-
-        String data = job.getConfiguration().get(GlobalConstants.RUNNING_DATE);
-        String field[] = data.split("-");
-        Path outPath = new Path("/ods/month=" + field[1] + "/day=" + field[2]);
-
-        try {
-            FileSystem fs = FileSystem.get(conf);
-
-            if (fs.exists(outPath)) {
-
-                fs.delete(outPath, true);
-            }
-            FileInputFormat.setInputPaths(job, outPath);
-        } catch (IOException e) {
-            logger.warn("配置信息有误", e);
-        }
-
     }
 
 
     /**
-     * 将收到的日期存储在conf中，以供后续使用
-     * 如果没有传递日期则默认是昨天的日志
-     *
-     * @param agrs
+     * 参数处理  ,将接收到的日期存储在conf中，以供后续使用
+     * @param args  如果没有传递日期，则默认使用昨天的日期
      * @param conf
      */
-    private void handleAgrs(String[] agrs, Configuration conf) {
-
+    private void setArgs(String[] args, Configuration conf) {
         String date = null;
-        for (int i = 0; i < agrs.length; i++) {
-            if (agrs[i].equals("-d")) {
-                if (i + 1 < agrs.length) {
-                    date = agrs[i + 1];
+        for (int i = 0;i < args.length;i++){
+            if(args[i].equals("-d")){
+                if(i+1 < args.length){
+                    date = args[i+1];
                     break;
                 }
             }
         }
         //代码到这儿，date还是null，默认用昨天的时间
-        if (date == null) {
-
-            date = TimeUtil.getYesterdayDate(date);
+        if(date == null){
+            date = TimeUtil.getYesterdayDate();
         }
-        conf.set(GlobalConstants.RUNNING_DATE, date);
+        //然后将date设置到时间conf中
+        conf.set(GlobalConstants.RUNNING_DATE,date);
+    }
+
+    /**
+     * 获取扫描的集合对象
+     * @param job
+     * @return
+     */
+    private List<Scan> getScans(Job job) {
+        Configuration conf = job.getConfiguration();
+        //获取运行日期
+        long start = Long.valueOf(TimeUtil.parserString2Long(conf.get(GlobalConstants.RUNNING_DATE)));
+        long end = start + GlobalConstants.DAY_OF_MILISECONDS;
+        //获取scan对象
+        Scan scan = new Scan();
+        scan.setStartRow(Bytes.toBytes(start+""));
+        scan.setStopRow(Bytes.toBytes(end+""));
+        //定义过滤器链
+        FilterList fl = new FilterList();
+        //定义单列值过滤器
+        fl.addFilter(new SingleColumnValueFilter(Bytes.toBytes(EventConstant.HBASE_COLUMN_FAMILY),
+                Bytes.toBytes(EventConstant.EVENT_COLUMN_NAME_EVENT_NAME),
+                CompareFilter.CompareOp.EQUAL,
+                Bytes.toBytes(EventConstant.EventEnum.LAUNCH.alias)));
+        //设置扫描的字段
+        String[] fields = {
+                EventConstant.EVENT_COLUMN_NAME_SERVER_TIME,
+                EventConstant.EVENT_COLUMN_NAME_UUID,
+                EventConstant.EVENT_COLUMN_NAME_PLATFORM,
+                EventConstant.EVENT_COLUMN_NAME_EVENT_NAME,
+                EventConstant.EVENT_COLUMN_NAME_BROWSER_NAME,
+                EventConstant.EVENT_COLUMN_NAME_BROWSER_VERSION
+        };
+        //将扫描的字段添加到filter中
+        fl.addFilter(this.getFilters(fields));
+        //将scan设置表名
+        scan.setAttribute(Scan.SCAN_ATTRIBUTES_TABLE_NAME,Bytes.toBytes(EventConstant.HBASE_TABLE_NAME));
+        //将filter设置到scan中
+        scan.setFilter(fl);
+        return Lists.newArrayList(scan);  //谷歌的api
+    }
+
+    /**
+     * 设置扫描的列
+     * @param fields
+     * @return
+     */
+    private Filter getFilters(String[] fields) {
+        int length = fields.length;
+        byte[][] filters = new byte[length][];
+        for (int i=0;i<length;i++){
+            filters[i] = Bytes.toBytes(fields[i]);
+        }
+
+        return new MultipleColumnPrefixFilter(filters);
     }
 }

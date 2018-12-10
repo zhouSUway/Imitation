@@ -16,6 +16,7 @@ import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.hbase.mapreduce.TableMapper;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.log4j.Logger;
+import org.apache.thrift.protocol.TJSONProtocol;
 
 import java.io.IOException;
 import java.util.List;
@@ -23,17 +24,15 @@ import java.util.List;
 /**
  * 新增的用户
  * 总用户
- * 需要使用mapper类中的launch统计的uuid的个数
+ * 需要使用mapper类中的launch统计去重的uuid的个数
  *
  */
 public class NewUserMapper extends TableMapper<StatsUserDimension,TimeOutputValue> {
 
     private static final Logger logger = Logger.getLogger(NewUserMapper.class);
-    private byte[] family = Bytes.toBytes(EventConstant.HBASE_COLUMN_FAMILY);
-    private StatsUserDimension sud = new StatsUserDimension();
-    private TimeOutputValue tov = new TimeOutputValue();
+    private StatsUserDimension key = new StatsUserDimension();
+    private TimeOutputValue value = new TimeOutputValue();
     private KpiDimension newUserKpi = new KpiDimension(KpiTypeEnum.NEW_USER.kpiName);
-    private KpiDimension browerNewUserKpi  = new KpiDimension(KpiTypeEnum.BROWSER_NEW_USER.kpiName);
 
 
     @Override
@@ -41,59 +40,52 @@ public class NewUserMapper extends TableMapper<StatsUserDimension,TimeOutputValu
 
         //需要取得的字段
 
-        String uuid = Bytes.toString(value.getValue(family,Bytes.toBytes(EventConstant.EVENT_COLUMN_NAME_UUID)));
-        String serverTime = Bytes.toString(value.getValue(family,Bytes.toBytes(EventConstant.EVENT_COLUMN_NAME_SERVER_TIME)));
-        String platform  = Bytes.toString(value.getValue(family,Bytes.toBytes(EventConstant.EVENT_COLUMN_NAME_PLATFORM)));
-        String browserName = Bytes.toString(value.getValue(family,Bytes.toBytes(EventConstant.EVENT_COLUMN_NAME_BROWSER_NAME)));
-        String browerVersion = Bytes.toString(value.getValue(family,Bytes.toBytes(EventConstant.EVENT_COLUMN_NAME_BROWSER_VERSION)));
+    String line = value.toString();
+    String [] fields = line.split("\001");
+    String uuid= fields[6];
+    String sTime = fields[15];
+    String platform = fields[2];
+    String envent = fields[0];
 
         //对三个字段进行判空
 
-        if (StringUtils.isEmpty(uuid)||StringUtils.isEmpty(serverTime)||StringUtils.isEmpty(platform)
-                ||StringUtils.isEmpty(browserName)||StringUtils.isEmpty(browerVersion)){
-            logger.warn("uuid"+uuid+"serverTime"+serverTime+"platform"+platform+"browerVersion"+
-            browerVersion);
-            return;
+   if (envent.equals(EventConstant.EventEnum.LAUNCH.alias));
+        {
+            logger.info("事件不是lanuch事件："+line);
+        }
+        //uuid和时间戳
+
+        if (StringUtils.isEmpty(sTime)||StringUtils.isEmpty(uuid)){
+            logger.info("stime is null and uid is null.sTime"+sTime+"uuid"+uuid);
         }
 
         //构建value
-        Long serverTimeOfLong = Long.valueOf(serverTime);
-        this.tov.setId(uuid);
-        this.tov.setTime(serverTimeOfLong);
+        Long serverTimeOfLong = Long.valueOf(sTime);
+        this.value.setId(uuid);
+        this.value.setTime(serverTimeOfLong);
 
         //1532593870123 2018-07-26 website 27F69684-BBE3-42FA-AA62-71F98E208
 
 
-        //构建输出的key
-        List<PlatformDimension> platformDimensions = PlatformDimension.buildPlatform(platform);
-        DateDimension dateDimensions = DateDimension.buildDate(serverTimeOfLong, DateEnum.DAY);
-        List<BrowserDimension> browserDimensions = BrowserDimension.buildBrower(browserName, browerVersion);
+        //构建key
+      DateDimension dateDimension = DateDimension.buildDate(serverTimeOfLong,DateEnum.DAY);
+      PlatformDimension platformDimension = new PlatformDimension(platform);
 
-        StatsCommonDimension statsCommonDimension = this.sud.getStatsCommonDimension();
+      StatsCommonDimension statsCommonDimension = this.key.getStatsCommonDimension();
 
-//        为statsCommonDimension赋值
+       //默认浏览器维度
 
-        statsCommonDimension.getDateDimension(dateDimensions);
-        BrowserDimension browserDimension = new BrowserDimension("", "");
+        BrowserDimension defaultBrower = new BrowserDimension("","");
+        statsCommonDimension.setDateDimension(dateDimension);
+        statsCommonDimension.setKpiDimension(newUserKpi);
+        statsCommonDimension.setPlatformDimension(platformDimension);
+
+        this.key.setStatsCommonDimension(statsCommonDimension);
+        this.key.setBrowserDimension(defaultBrower);
 
         //循环平台维度集合对象
-
-        for (PlatformDimension platformDimension:platformDimensions){
-            statsCommonDimension.setKpiDimension(newUserKpi);
-            statsCommonDimension.setPlatformDimension(platformDimension);
-            this.sud.setStatsCommonDimension(statsCommonDimension);
-            this.sud.setBrowserDimension(browserDimension);
-        }
-
-
-
-        //输出
-        context.write(this.sud,this.tov);
         //该循环的输出用于浏览器模块的新增用户指标统计
-        for (BrowserDimension br :browserDimensions){
-            statsCommonDimension.setKpiDimension(browerNewUserKpi);
-            this.sud.setStatsCommonDimension(statsCommonDimension);
-            this.sud.setBrowserDimension(br);
-        }
+        context.write(this.key,this.value);
+
     }
 }

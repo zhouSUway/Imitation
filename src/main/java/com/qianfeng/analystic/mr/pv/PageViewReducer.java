@@ -2,13 +2,11 @@ package com.qianfeng.analystic.mr.pv;
 
 
 import com.qianfeng.analystic.model.dim.StatsUserDimension;
-import com.qianfeng.analystic.model.dim.base.KpiDimension;
 import com.qianfeng.analystic.model.dim.value.map.TimeOutputValue;
 import com.qianfeng.analystic.model.dim.value.reduce.MapperOutputValue;
 import com.qianfeng.common.KpiTypeEnum;
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.MapWritable;
-import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Reducer;
 
 import java.io.IOException;
